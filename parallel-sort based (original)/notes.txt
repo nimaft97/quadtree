@@ -1,0 +1,49 @@
+1. in order to define a global variable in a header file, it must be declared with the 'extern' keyword
+ and be be defined in one of .cpp files. e.g.
+ // variables.hpp
+ extern std::vector<Node> tree;
+
+ // main.cpp
+ std::vector<Node> tree;
+
+2. std::string can not be used in device/kernel. Therefore, I temporarily delete path from Node struct
+ but it needs to be reimplemented using C-style array of characters.
+
+3. at most one array of shared data is supported per kernel in CUDA. Therefore, the total required bytes must be
+ calculated and assigned in <<< >>>. An array of shared memory will be assigned and different pointers may be
+ used to help find desired elements.
+
+4. in order to turn the nvcc's linker on so that it can link different .cpp/.cu files, 
+ the following command is required: --relocatable-device-code={true,false}/ -rdc={true,false}
+
+5. does an instance of a struct occupy sizeof(struct) bytes?
+
+6. when transferring a struct that contains pointers to the GPU, care must be taken.
+ Actually, cudaMalloc saves enough space for those structs and cudaMemcpy copies the desired values 
+ from host to device. However, those pointers are still pointing to some locations on device side. 
+ Therefore, in order to address this issue, all pointers inside a struct must be allocated memory on device
+ using cudaMalloc separately. Consequently, although a struct along with its pointers can be moved completely
+ to device, it's recommended to prevent it. For instance, a linked list or tree structure can be implemented
+ by indices being stored instead of pointers to next and previous nodes.
+ (https://stackoverflow.com/questions/15431365/cudamemcpy-segmentation-fault/15435592#15435592)
+
+7. cuda debugger tool gdb and memcheck are useful tools to figure out memory leaks, out of bound accesses and ...
+ if the cuda code is compiled with debugging flags -g (for host) and -G (for device) and then memcheck is called, 
+ issues with some information like kernel names and their lines of occurence can be found.
+ syntax: cuda-memcheck [options] [your-program] [your-program-options]
+ (https://on-demand.gputechconf.com/gtc/2014/presentations/S4580-cuda-gdb-cuda-memcheck-debugging-tools.pdf)
+
+8. When a function is of type __device__ or __global__ it means that it is going to be executed on device and
+since stl functions are not compatible with the device environment, they can't be used.
+
+9. Is it efficient that I always call cudaFree inside a while loop? Can it be flushed instead?
+
+10. If there are duplicates, the quadtree construction process won't terminate. Therefore, the simplest solution 
+might be not permitting to have duplicates.
+
+11. What if even not all points can be stored insdie the global/shared memories? This questions hints that the usage
+of the shared memory in this version is not correct. According to CUDA guidelines, the shared memory is actually shared
+among threads in the same block. Consequently, blocks need to focus to separated parts of the points array and only
+load the part of it that is required. 
+
+12. Some of the synchronizations are redundant. Remove them!

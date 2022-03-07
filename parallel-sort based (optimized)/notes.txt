@@ -1,0 +1,19 @@
+1. Possible optimizations are as follow:
+   - corner points inside a Node instance can be calculated once needed
+   instead of storing them (and hence having memory devoted to them). This
+   potential optimization is actually a tradeoff between spatial complexity 
+   and time complexity and needs to be implemented.
+
+   - In the original version, one thread is responsible for expanding a node.
+   This means that one single node must assign numbers to points of a parent node,
+   sort them and add its children to the associated array. However, this process
+   can be assigned to a thread block to further parallelize different tasks.
+   
+   - It's better to keep threads/thread blocks as busy as possible. Although the overhead
+   cause by idling and assigning new jobs to threads is not as high as CPU cores, it's
+   recommended not to idle threads if they can remain busy and deliver more tasks.
+
+   - Another potential optimization may be predicting an upper bound for the depth of
+   the quadtree and sort the points array once. In this way, according to the estimated 
+   depth, numbers must be assigned and sorted afterwards. 
+

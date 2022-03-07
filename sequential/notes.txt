@@ -1,0 +1,9 @@
+- in order to define a global variable in a header file, it must be declared with the 'extern' keyword
+ and be be defined in one of .cpp files. e.g.
+ // variables.hpp
+ extern std::vector<Node> tree;
+
+ // main.cpp
+ std::vector<Node> tree;
+
+ 
