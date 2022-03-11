@@ -4,14 +4,14 @@
 #include <iostream>
 #include <vector>
 
-struct Point{
+struct __attribute__((__packed__, aligned(1))) Point{
 public:
     int x;
     int y;
     int num;
 };
 
-struct Node{
+struct __attribute__((__packed__, aligned(1))) Node{
 private:
     
     bool initialized = false;

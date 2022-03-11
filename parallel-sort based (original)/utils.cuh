@@ -146,25 +146,25 @@ void kernel(Point* dpoints, Node* dnodes, int pointNum, int nodeNum, int lengthM
     lengthMax: maximum number of nodes to be stored
     */
     // assuming that data is stored without padding!!!
-    extern __shared__ Node shared[];
-    Node* nShared = shared; // [0, lengthMax) dedicated to Nodes/ [0, nodeNum) is already filled
-    Point* pShared = (Point*)&nShared[lengthMax]; // [lengthMax, lengthMax + pointNum) dedicated to points
+    // extern __shared__ Node shared[];
+    // Node* nShared = shared; // [0, lengthMax) dedicated to Nodes/ [0, nodeNum) is already filled
+    // Point* pShared = (Point*)&nShared[lengthMax]; // [lengthMax, lengthMax + pointNum) dedicated to points
     
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     int stride = gridDim.x * blockDim.x;
 
-    if (tid < nodeNum) // at first there are nodeNum nodes in nodes
-        for (int i=tid; i<nodeNum; i+=stride)
-            nShared[i] = dnodes[i];
+    // if (tid < nodeNum) // at first there are nodeNum nodes in nodes
+    //     for (int i=tid; i<nodeNum; i+=stride)
+    //         nShared[i] = dnodes[i];
     
-    if (tid < pointNum) // number of points is always pointNum
-        for (int i=tid; i<pointNum; i+=stride)
-            pShared[i] = dpoints[i];
-    __syncthreads();
+    // if (tid < pointNum) // number of points is always pointNum
+    //     for (int i=tid; i<pointNum; i+=stride)
+    //         pShared[i] = dpoints[i];
+    // __syncthreads();
 
     // ----------------------
-    // Point* pShared = dpoints;
-    // Node* nShared = dnodes;
+    Point* pShared = dpoints;
+    Node* nShared = dnodes;
     // ----------------------
             
     if (tid < lengthMax){
@@ -208,13 +208,13 @@ void kernel(Point* dpoints, Node* dnodes, int pointNum, int nodeNum, int lengthM
             end = start + nodeNum;
         }        
     }
-    if (tid < lengthMax)
-        for (int i=tid+nodeNum; i<lengthMax; i+=stride)
-            dnodes[i] = nShared[i];
+    // if (tid < lengthMax)
+    //     for (int i=tid+nodeNum; i<lengthMax; i+=stride)
+    //         dnodes[i] = nShared[i];
     
-    if (tid < pointNum)
-        for (int i=tid; i<pointNum; i+=stride)
-            dpoints[i] = pShared[i];
+    // if (tid < pointNum)
+    //     for (int i=tid; i<pointNum; i+=stride)
+    //         dpoints[i] = pShared[i];
 
 }
 

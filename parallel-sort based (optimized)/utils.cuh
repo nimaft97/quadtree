@@ -9,6 +9,7 @@
 #include <cassert>
 #include <thrust/sort.h>
 #include <thrust/execution_policy.h>
+#include <cub/cub.cuh>
 
 #include "structure.cuh"
 
@@ -63,8 +64,9 @@ void assignNumPoints(Point* points, Node anscestor, int* counts, int N, int tIdx
     assert(idx_s>=0);
     int x_range = x_max - x_min, y_range = y_max - y_min;
     
-    for (int i=idx_s+tIdx; i<idx_e+1; i+bDim) // simple for loop because it's going to be called by the kernel
+    for (int i=idx_s+tIdx; i<idx_e+1; i+=bDim){ // simple for loop because it's going to be called by the kernel
         assignNumPoint(points[i], x_min, y_min, x_range, y_range, counts);
+    }
 }
 
 void copyTree2Arr(const std::vector<std::vector<Node>>& tree, Node* nodes, int& nodeNum, int K_MAX){
@@ -138,6 +140,12 @@ void appendArr2Tree(std::vector<std::vector<Node>>& tree, Node* nodes, int nodeN
     }
 }
 
+template <typename T> 
+__device__ 
+void inline swap(T& num1, T& num2){
+    T num3(num1); num1=num2; num2=num3;
+}
+
 __global__
 void kernel(Point* dpoints, Node* dnodes, int pointNum, int nodeNum, int lengthMax, int K_MAX){
     /*
@@ -146,30 +154,31 @@ void kernel(Point* dpoints, Node* dnodes, int pointNum, int nodeNum, int lengthM
     lengthMax: maximum number of nodes to be stored
     */
     // assuming that data is stored without padding!!!
-    extern __shared__ Node shared[];
-    Node* nShared = shared; // [0, lengthMax) dedicated to Nodes/ [0, nodeNum) is already filled
-    Point* pShared = (Point*)&nShared[lengthMax]; // [lengthMax, lengthMax + pointNum) dedicated to points
+    // extern __shared__ Node shared[];
+    // Node* nShared = shared; // [0, lengthMax) dedicated to Nodes/ [0, nodeNum) is already filled
+    // Point* pShared = (Point*)&nShared[lengthMax]; // [lengthMax, lengthMax + pointNum) dedicated to points
     
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int stride = gridDim.x * blockDim.x;
+    // int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    // int stride = gridDim.x * blockDim.x;
     int blockStride = gridDim.x;
 
-    if (tid < nodeNum) // at first there are nodeNum nodes in nodes
-        for (int i=tid; i<nodeNum; i+=stride)
-            nShared[i] = dnodes[i];
+    // if (tid < nodeNum) // at first there are nodeNum nodes in nodes
+    //     for (int i=tid; i<nodeNum; i+=stride)
+    //         nShared[i] = dnodes[i];
     
-    if (tid < pointNum) // number of points is always pointNum
-        for (int i=tid; i<pointNum; i+=stride)
-            pShared[i] = dpoints[i];
-    __syncthreads();
+    // if (tid < pointNum) // number of points is always pointNum
+    //     for (int i=tid; i<pointNum; i+=stride)
+    //         pShared[i] = dpoints[i];
+    // __syncthreads();
 
     // ----------------------
-    // Point* pShared = dpoints;
-    // Node* nShared = dnodes;
+    Point* pShared = dpoints;
+    Node* nShared = dnodes;
     // ----------------------
             
     if (blockIdx.x < lengthMax){
         int start = 0, end = nodeNum;
+        printf("start: %d\n", start);
         while(end + nodeNum*4 <= lengthMax){
             for (int i=start+blockIdx.x; i<end; i+=blockStride){
                 Node node = nShared[i];
@@ -181,43 +190,50 @@ void kernel(Point* dpoints, Node* dnodes, int pointNum, int nodeNum, int lengthM
                     // here we need to make sure that counts are consistent among threads
                     
                     int idx_s, idx_e; node.getIdx(idx_s, idx_e);
-                    int x_s, y_s; node.getBottomLeftPoint(x_s, y_s);
-                    int x_e, y_e; node.getTopRightPoint(x_e, y_e);
-                    int x_m = (x_s+x_e)/2, y_m = (y_s+y_e)/2; // these can be deleted
                     
                     // sort
-                    // thrust::sort(thrust::seq, pShared+idx_s, pShared+idx_e+1, [](Point& p1, Point& p2){
-                    //     return p1.num < p2.num;
-                    // });
+                    // here, the execution policy is set to thrust::device which means that dynamic parallelism is intended.
+                    thrust::sort(thrust::device, pShared+idx_s, pShared+idx_e+1, [](Point& p1, Point& p2){
+                        return p1.num < p2.num;
+                    });
+                    // sequential
+                    // if (threadIdx.x == 0){
+                    //     thrust::sort(thrust::seq, pShared+idx_s, pShared+idx_e+1, [](Point& p1, Point& p2){
+                    //         return p1.num < p2.num;
+                    //     });
+                    // }
+                    __syncthreads(); // it's enough because threads across one block must be synchronized
 
-                    // parallelized bubble sort - the inner for loop has been replaced with threadIdx.x
-                    int length = idx_e - idx_s + 1;
-                    for (int counter = 0; counter < length/2; counter++){
-                        int t = threadIdx.x;
-                        if (t % 2 == 0 && t<length-1)
-                            if (values[idx_s+t+1] < values[idx_s+t])
-                                swap(values[idx_s+t+1], values[idx_s+t]);
-                        __syncthreads();
-                        if (t % 2 == 1 && t<length-1)
-                            if (values[idx_s+t+1] < values[idx_s+t])
-                                swap(values[idx_s+t+1], values[idx_s+t]);
-                        __syncthreads();
-                    }
-
-                    Node node0; node0.initialize(x_s, y_s, x_m, y_m, idx_s, idx_s+counts[0]-1);
-                    Node node1; node1.initialize(x_m, y_s, x_e, y_m, idx_s+counts[0], idx_s+counts[0]+counts[1]-1);
-                    Node node2; node2.initialize(x_s, y_m, x_m, y_e, idx_s+counts[0]+counts[1], idx_s+counts[0]+counts[1]+counts[2]-1);
-                    Node node3; node3.initialize(x_m, y_m, x_e, y_e, idx_s+counts[0]+counts[1]+counts[2], idx_s+counts[0]+counts[1]+counts[2]+counts[3]-1);
-
-                    Node childNodesArr[] = {node0, node1, node2, node3};
-
-                    int baseIdx = (i-start)*4 + end;
-                    for (int j=0; j<4; j++)
-                        nShared[baseIdx+j] = childNodesArr[j];
+                    // here, counts arrays must be integrated!!!!!!!!!!!!
+                    // counts_aggregated where threadIdx.x == 0 contains the fully integrated version
+                    typedef cub::BlockReduce<int, 2> BlockReduce; // here, 4 is the number of threads in a block
+                    __shared__ typename BlockReduce::TempStorage temp_storage;
+                    int counts_aggregrated[4];
+                    for (int counter=0; counter<4; counter++)
+                        counts_aggregrated[counter] = BlockReduce(temp_storage).Sum(counts[counter]);
                     
-                    // can be ignored in kernel because arr2tree handles this indices
-                    int childNodesIdx[4] = {baseIdx, baseIdx+1, baseIdx+2, baseIdx+3};
-                    node.setChildren(childNodesIdx);
+                    if (threadIdx.x == 0){ // because threadIdx.x is where statistics are fully integrated
+                        int x_s, y_s; node.getBottomLeftPoint(x_s, y_s);
+                        int x_e, y_e; node.getTopRightPoint(x_e, y_e);
+                        int x_m = (x_s+x_e)/2, y_m = (y_s+y_e)/2; // these can be deleted
+
+                        // these four nodes can be defined inside the following for loop to occupy less memory
+                        Node node0; node0.initialize(x_s, y_s, x_m, y_m, idx_s, idx_s+counts_aggregrated[0]-1);
+                        Node node1; node1.initialize(x_m, y_s, x_e, y_m, idx_s+counts_aggregrated[0], idx_s+counts_aggregrated[0]+counts_aggregrated[1]-1);
+                        Node node2; node2.initialize(x_s, y_m, x_m, y_e, idx_s+counts_aggregrated[0]+counts_aggregrated[1], idx_s+counts_aggregrated[0]+counts_aggregrated[1]+counts_aggregrated[2]-1);
+                        Node node3; node3.initialize(x_m, y_m, x_e, y_e, idx_s+counts_aggregrated[0]+counts_aggregrated[1]+counts_aggregrated[2], idx_s+counts_aggregrated[0]+counts_aggregrated[1]+counts_aggregrated[2]+counts_aggregrated[3]-1);
+
+                        Node childNodesArr[4] = {node0, node1, node2, node3};
+
+                        int baseIdx = (i-start)*4 + end;
+                        for (int j=0; j<4; j++)
+                            nShared[baseIdx+j] = childNodesArr[j];
+                        
+                        // can be ignored in kernel because arr2tree handles this indices
+                        int childNodesIdx[4] = {baseIdx, baseIdx+1, baseIdx+2, baseIdx+3};
+                        node.setChildren(childNodesIdx);
+
+                    }                   
                 }
             }
             __syncthreads();
@@ -226,13 +242,13 @@ void kernel(Point* dpoints, Node* dnodes, int pointNum, int nodeNum, int lengthM
             end = start + nodeNum;
         }        
     }
-    if (tid < lengthMax)
-        for (int i=tid+nodeNum; i<lengthMax; i+=stride)
-            dnodes[i] = nShared[i];
+    // if (tid < lengthMax)
+    //     for (int i=tid+nodeNum; i<lengthMax; i+=stride)
+    //         dnodes[i] = nShared[i];
     
-    if (tid < pointNum)
-        for (int i=tid; i<pointNum; i+=stride)
-            dpoints[i] = pShared[i];
+    // if (tid < pointNum)
+    //     for (int i=tid; i<pointNum; i+=stride)
+    //         dpoints[i] = pShared[i];
 
 }
 
@@ -293,7 +309,7 @@ void constuctTree(std::vector<std::vector<Node>>& tree, Point* points, int K_MAX
         // std::cerr << "size of Point: " << sizeof(Point) << ", N: " << N << " -> " << N*sizeof(Point) << "\n";
         // std::cerr << "Total bytes: " << total_bytes << "\n";
         dim3 gridDim(2, 1, 1);
-        dim3 blockDim(3, 1, 1);
+        dim3 blockDim(2, 1, 1);
         kernel<<<gridDim, blockDim, total_bytes>>>(dpoints, dnodes, N, nodeNum, lengthMax, K_MAX);
         // cudaDeviceSynchronize();
 

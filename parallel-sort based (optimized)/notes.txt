@@ -10,10 +10,51 @@
    can be assigned to a thread block to further parallelize different tasks.
    
    - It's better to keep threads/thread blocks as busy as possible. Although the overhead
-   cause by idling and assigning new jobs to threads is not as high as CPU cores, it's
+   caused by idling and assigning new jobs to threads is not as high as CPU cores, it's
    recommended not to idle threads if they can remain busy and deliver more tasks.
 
    - Another potential optimization may be predicting an upper bound for the depth of
    the quadtree and sort the points array once. In this way, according to the estimated 
    depth, numbers must be assigned and sorted afterwards. 
+
+2. Now that each thred block is going to be responsible for one branch/sub-tree, it can only
+load a sub-array of points array and write it again to the global memory.
+
+3. In order to be able to use CUB library, its latest version must be downloaded from the following
+link (https://nvlabs.github.io/cub/download_cub.html) and the application must be compiled using
+nvcc command. Moreover, an additional flag "-I" along with the location of unzipped CUB folder needs
+to be added.
+
+4. blockDim in CUB blockReduce must be a constant (an integer not a variable). Therefore, it must be
+changed manually!!!
+
+5. Now that in this version, one block is responsible for splitting a node, sorting must also take place
+inside a thread block instead of a thread. Therefore, there is a need to sort points array in parallel utilizing
+all threads present in the block. To this end, there are 3 options:
+   1. writing a kernel (code)
+   2. using thrust - execution policy has made me confused. In fact, I'm not still sure if thrust supports 
+   dynamic parallelism (calling parallel functions inside a kernel).
+   3. CUB - I'm not still sure that whether CUB's sort can be applied to an array of structs
+---- so far, I have learned that CUB can be used to implement reductions device-/block-/warp-wide.
+
+6. In CUDA 5.5 and later, dynamic parallelism is supported. It means that thrust functions, CUB algorithms
+ and other kernels can be invoked from inside a kernel. If proper compilation setting is provided, when a thread
+ calls another kernel, actually, a CDP (CUDA Dynamic Parallelism) child kernel will be launched. In this case, 
+ threads can cooperated to execute the child kernel. Otherwise, each thread that calls another kernel, will execute
+ it sequentially.
+ https://stackoverflow.com/a/48736900
+
+7. In order to compile a CUDA application to be capable of performing dynamic parallelism, the following line must be
+executed: 
+nvcc -I '/home/nima/Desktop/IE/UVic/Research/NRC/Code/quadtree/parallel-sort based (optimized)/cub-1.8.0'  -arch=sm_35 -rdc=true *.cu -lcudadevrt -o main.o
+- -I 'location': is required when CUB is being used
+- -arch=sm_35: dynamic parallelism is supported by devices with compute-capability of 3.5 or higher.
+- rdc=true: which is an abbrevation form for relocatable-device-code is used when multiple .cu files exist
+- -lcudadevrt: once an output object is constructed by nvcc, in order to enable CDP, it must be linked to 
+  cuda's device runtime library. 
+https://developer.nvidia.com/blog/introduction-cuda-dynamic-parallelism/
+
+8. 
+
+
 
